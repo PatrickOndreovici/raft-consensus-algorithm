@@ -90,7 +90,10 @@ func (n *Node) startElection() {
 
 	wg.Wait()
 
-	if numberOfVotes > len(n.Peers)/2 {
+	clusterSize := len(n.Peers) + 1
+	majority := clusterSize/2 + 1
+
+	if numberOfVotes >= majority {
 		n.mu.Lock()
 		n.State = Leader
 		n.mu.Unlock()
