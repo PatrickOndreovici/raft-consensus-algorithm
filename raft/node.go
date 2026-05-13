@@ -32,11 +32,10 @@ func NewNode(id int, addr string) *Node {
 
 func (n *Node) runElectionTimer() {
 	timeout := electionTimeout()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
+	ticker := time.NewTicker(timeout)
+	defer ticker.Stop()
 	for {
-		<-timer.C
+		<-ticker.C
 
 		n.mu.Lock()
 		if n.State != Leader {
@@ -45,7 +44,6 @@ func (n *Node) runElectionTimer() {
 			return
 		}
 		n.mu.Unlock()
-		timer.Reset(electionTimeout())
 	}
 }
 
