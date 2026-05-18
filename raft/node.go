@@ -17,6 +17,9 @@ type Node struct {
 	State       State
 	CurrentTerm int
 	VotedFor    int
+
+	heartbeatCh   chan struct{}
+	electionTimer *time.Timer
 }
 
 func NewNode(id int, addr string) *Node {
@@ -30,20 +33,36 @@ func NewNode(id int, addr string) *Node {
 	}
 }
 
-func (n *Node) runElectionTimer() {
-	timeout := electionTimeout()
-	ticker := time.NewTicker(timeout)
-	defer ticker.Stop()
-	for {
-		<-ticker.C
+func (n *Node) run() {
+	n.electionTimer = time.NewTimer(electionTimeout())
 
-		n.mu.Lock()
-		if n.State != Leader {
-			n.mu.Unlock()
-			n.startElection()
-			return
+	for {
+		select {
+
+		case <-n.electionTimer.C:
+			n.mu.Lock()
+			if n.State == Follower {
+				n.State = Candidate
+				n.mu.Unlock()
+				go n.startElection()
+			} else {
+				n.mu.Unlock()
+			}
+			n.electionTimer.Reset(electionTimeout())
+
+		case <-n.heartbeatCh:
+			// Reset the election timer.
+			// If the timer already expired before this heartbeat arrived,
+			// a stale event may still be pending in the timer channel.
+			// We drain it to prevent a false election.
+			if !n.electionTimer.Stop() {
+				select {
+				case <-n.electionTimer.C:
+				default:
+				}
+			}
+			n.electionTimer.Reset(electionTimeout())
 		}
-		n.mu.Unlock()
 	}
 }
 
@@ -71,12 +90,16 @@ func (n *Node) startElection() {
 
 			reply := RequestVoteReply{}
 
-			err := peer.Call("Raft.RequestVote", RequestVoteArgs{
+			err := peer.Call("Node.RequestVote", RequestVoteArgs{
 				Term:        localCurrentTerm,
 				CandidateID: n.ID,
 			}, &reply)
 
 			if err != nil {
+				return
+			}
+
+			if reply.Term > localCurrentTerm {
 				return
 			}
 
@@ -96,6 +119,57 @@ func (n *Node) startElection() {
 	if numberOfVotes >= majority {
 		n.mu.Lock()
 		n.State = Leader
+		go n.leaderSendHeartbeat()
 		n.mu.Unlock()
+	}
+}
+
+func (n *Node) leaderSendHeartbeat() {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+
+		n.mu.Lock()
+		if n.State != Leader {
+			n.mu.Unlock()
+			return
+		}
+
+		term := n.CurrentTerm
+		leaderID := n.ID
+		n.mu.Unlock()
+
+		for peerID, peer := range n.Peers {
+
+			go func(peerID int, peer *rpc.Client, term int, leaderID int) {
+
+				args := AppendEntriesArgs{
+					Term:     term,
+					LeaderID: leaderID,
+				}
+
+				var reply AppendEntriesReply
+
+				if err := peer.Call("RpcHandler.AppendEntries", args, &reply); err != nil {
+					return
+				}
+
+				n.mu.Lock()
+				defer n.mu.Unlock()
+
+				if n.State != Leader {
+					return
+				}
+
+				if reply.Term > n.CurrentTerm {
+					n.CurrentTerm = reply.Term
+					n.State = Follower
+					n.VotedFor = -1
+					return
+				}
+
+			}(peerID, peer, term, leaderID)
+		}
 	}
 }

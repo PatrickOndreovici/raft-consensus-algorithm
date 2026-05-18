@@ -6,11 +6,21 @@ import (
 	"net/rpc"
 )
 
+type RpcHandler struct {
+	node *Node
+}
+
+func NewRpcHandler(node *Node) *RpcHandler {
+	return &RpcHandler{node: node}
+}
+
 func (n *Node) Start() {
 
 	server := rpc.NewServer()
 
-	server.Register(n)
+	handler := NewRpcHandler(n)
+
+	server.Register(handler)
 
 	listener, err := net.Listen("tcp", n.Addr)
 	if err != nil {
@@ -18,6 +28,8 @@ func (n *Node) Start() {
 	}
 
 	fmt.Printf("Node %d listening on %s\n", n.ID, n.Addr)
+
+	go n.run()
 
 	for {
 		conn, _ := listener.Accept()
@@ -33,10 +45,10 @@ type PingReply struct {
 	Message string
 }
 
-func (n *Node) Ping(args PingArgs, reply *PingReply) error {
+func (rpc *RpcHandler) Ping(args PingArgs, reply *PingReply) error {
 	fmt.Printf(
 		"Node %d received ping: %s\n",
-		n.ID,
+		rpc.node.ID,
 		args.Message,
 	)
 
@@ -45,10 +57,10 @@ func (n *Node) Ping(args PingArgs, reply *PingReply) error {
 	return nil
 }
 
-func (n *Node) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
+func (rpc *RpcHandler) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 
 }
 
-func (n *Node) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
+func (rpc *RpcHandler) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
 
 }

@@ -27,7 +27,7 @@ func (n *Node) SendPing(peerID int, message string) {
 	var reply PingReply
 
 	err := client.Call(
-		"Node.Ping",
+		"RpcHandler.Ping",
 		PingArgs{Message: message},
 		&reply,
 	)
