@@ -58,7 +58,31 @@ func (rpc *RpcHandler) Ping(args PingArgs, reply *PingReply) error {
 }
 
 func (rpc *RpcHandler) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
+	rpc.node.mu.Lock()
+	defer rpc.node.mu.Unlock()
 
+	node := rpc.node
+
+	reply.Term = node.CurrentTerm
+	reply.VoteGranted = false
+
+	if args.Term < node.CurrentTerm {
+		return
+	}
+
+	if args.Term > node.CurrentTerm {
+		node.CurrentTerm = args.Term
+		node.State = Follower
+		node.VotedFor = -1
+		reply.Term = node.CurrentTerm
+	}
+
+	if node.VotedFor == -1 || node.VotedFor == args.CandidateID {
+		node.VotedFor = args.CandidateID
+		reply.VoteGranted = true
+	}
+
+	reply.Term = node.CurrentTerm
 }
 
 func (rpc *RpcHandler) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {

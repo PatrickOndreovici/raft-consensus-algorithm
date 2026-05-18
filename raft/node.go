@@ -90,7 +90,7 @@ func (n *Node) startElection() {
 
 			reply := RequestVoteReply{}
 
-			err := peer.Call("Node.RequestVote", RequestVoteArgs{
+			err := peer.Call("RpcHandler.RequestVote", RequestVoteArgs{
 				Term:        localCurrentTerm,
 				CandidateID: n.ID,
 			}, &reply)
