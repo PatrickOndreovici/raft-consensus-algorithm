@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"log"
 	"net/rpc"
 )
 
@@ -14,11 +15,10 @@ func (n *Node) ConnectToPeer(id int, addr string) {
 
 	n.Peers[id] = client
 
-	fmt.Printf(
-		"Node %d connected to node %d\n",
+	log.Printf("Node %d connected to node %d\n",
 		n.ID,
-		id,
-	)
+		id)
+	
 }
 
 func (n *Node) SendPing(peerID int, message string) {

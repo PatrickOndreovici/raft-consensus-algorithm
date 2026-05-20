@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"log"
 	"math/rand"
 	"net/rpc"
 	"sync"
@@ -30,6 +31,7 @@ func NewNode(id int, addr string) *Node {
 		State:       Follower,
 		CurrentTerm: 0,
 		VotedFor:    -1,
+		heartbeatCh: make(chan struct{}, 1),
 	}
 }
 
@@ -41,16 +43,18 @@ func (n *Node) run() {
 
 		case <-n.electionTimer.C:
 			n.mu.Lock()
-			if n.State == Follower {
+			if n.State != Leader {
 				n.State = Candidate
 				n.mu.Unlock()
 				go n.startElection()
 			} else {
 				n.mu.Unlock()
 			}
+
 			n.electionTimer.Reset(electionTimeout())
 
 		case <-n.heartbeatCh:
+			log.Printf("Node %d received heartbeat", n.ID)
 			// Reset the election timer.
 			// If the timer already expired before this heartbeat arrived,
 			// a stale event may still be pending in the timer channel.
@@ -67,10 +71,11 @@ func (n *Node) run() {
 }
 
 func electionTimeout() time.Duration {
-	return time.Duration(150+rand.Intn(150)) * time.Millisecond
+	return time.Duration(150+rand.Intn(1500)) * time.Millisecond
 }
 
 func (n *Node) startElection() {
+	log.Printf("Node %d started election", n.ID)
 	n.mu.Lock()
 	n.CurrentTerm++
 	n.State = Candidate
@@ -117,6 +122,7 @@ func (n *Node) startElection() {
 	majority := clusterSize/2 + 1
 
 	if numberOfVotes >= majority {
+		log.Printf("Node %d won the election", n.ID)
 		n.mu.Lock()
 		n.State = Leader
 		go n.leaderSendHeartbeat()
@@ -172,4 +178,8 @@ func (n *Node) leaderSendHeartbeat() {
 			}(peerID, peer, term, leaderID)
 		}
 	}
+}
+
+func (n *Node) StartRaft() {
+	go n.run()
 }

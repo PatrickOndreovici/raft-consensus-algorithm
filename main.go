@@ -25,11 +25,11 @@ func main() {
 	n3.ConnectToPeer(1, ":8001")
 	n3.ConnectToPeer(2, ":8002")
 
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 2)
 
-	n1.SendPing(2, "hello from node1")
-	n2.SendPing(3, "hello from node2")
-	n3.SendPing(1, "hello from node3")
+	n1.StartRaft()
+	n2.StartRaft()
+	n3.StartRaft()
 
 	select {}
 }

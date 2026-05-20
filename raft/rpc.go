@@ -29,8 +29,6 @@ func (n *Node) Start() {
 
 	fmt.Printf("Node %d listening on %s\n", n.ID, n.Addr)
 
-	go n.run()
-
 	for {
 		conn, _ := listener.Accept()
 		go server.ServeConn(conn)
@@ -57,7 +55,7 @@ func (rpc *RpcHandler) Ping(args PingArgs, reply *PingReply) error {
 	return nil
 }
 
-func (rpc *RpcHandler) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
+func (rpc *RpcHandler) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) error {
 	rpc.node.mu.Lock()
 	defer rpc.node.mu.Unlock()
 
@@ -67,7 +65,7 @@ func (rpc *RpcHandler) RequestVote(args RequestVoteArgs, reply *RequestVoteReply
 	reply.VoteGranted = false
 
 	if args.Term < node.CurrentTerm {
-		return
+		return nil
 	}
 
 	if args.Term > node.CurrentTerm {
@@ -83,8 +81,15 @@ func (rpc *RpcHandler) RequestVote(args RequestVoteArgs, reply *RequestVoteReply
 	}
 
 	reply.Term = node.CurrentTerm
+
+	return nil
 }
 
-func (rpc *RpcHandler) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
+func (rpc *RpcHandler) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) error {
+	select {
+	case rpc.node.heartbeatCh <- struct{}{}:
+	default:
+	}
 
+	return nil
 }
