@@ -1,35 +1,47 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"raft-consensus-algorithm/raft"
 	"time"
 )
 
+type Peer struct {
+	ID      int    `json:"id"`
+	Address string `json:"address"`
+}
+
 func main() {
-	n1 := raft.NewNode(1, ":8001")
-	n2 := raft.NewNode(2, ":8002")
-	n3 := raft.NewNode(3, ":8003")
+	id := flag.Int("id", 0, "node id")
+	address := flag.String("address", ":8000", "node address")
+	peersJson := flag.String("peers", "[]", "peers json")
+	flag.Parse()
 
-	go n1.Start()
-	go n2.Start()
-	go n3.Start()
+	if *id == 0 || *address == "" {
+		panic("id and address are required")
+	}
 
-	time.Sleep(time.Second)
+	var peers []Peer
 
-	n1.ConnectToPeer(2, ":8002")
-	n1.ConnectToPeer(3, ":8003")
+	err := json.Unmarshal([]byte(*peersJson), &peers)
+	if err != nil {
+		panic(err)
+	}
 
-	n2.ConnectToPeer(1, ":8001")
-	n2.ConnectToPeer(3, ":8003")
+	node := raft.NewNode(*id, *address)
 
-	n3.ConnectToPeer(1, ":8001")
-	n3.ConnectToPeer(2, ":8002")
+	go node.Start()
 
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 15)
 
-	n1.StartRaft()
-	n2.StartRaft()
-	n3.StartRaft()
+	for _, p := range peers {
+		node.ConnectToPeer(p.ID, p.Address)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	node.StartRaft()
 
 	select {}
 }
