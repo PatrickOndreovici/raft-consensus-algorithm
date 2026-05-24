@@ -97,11 +97,11 @@ func (rpc *RpcHandler) AppendEntries(args AppendEntriesArgs, reply *AppendEntrie
 		return nil
 	}
 
-	if args.Term >= node.CurrentTerm {
+	if args.Term > node.CurrentTerm || node.State != Follower {
 		node.becomeFollower(args.Term)
-		reply.Term = node.CurrentTerm
 	}
 
+	reply.Term = node.CurrentTerm
 	reply.Success = true
 
 	select {
