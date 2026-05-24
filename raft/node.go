@@ -201,3 +201,21 @@ func (n *Node) becomeFollower(term int) {
 func (n *Node) StartRaft() {
 	go n.run()
 }
+
+func (n *Node) startReporting() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		n.mu.Lock()
+		state := n.State
+		term := n.CurrentTerm
+		voted := n.VotedFor
+		n.mu.Unlock()
+
+		log.Printf(
+			"[REPORT Node %d] state=%v term=%d votedFor=%d peers=%d",
+			n.ID, state, term, voted, len(n.Peers)+1,
+		)
+	}
+}

@@ -29,6 +29,8 @@ func (n *Node) Start() {
 
 	fmt.Printf("Node %d listening on %s\n", n.ID, n.Addr)
 
+	go n.startReporting()
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
