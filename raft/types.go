@@ -6,6 +6,7 @@ const (
 	Follower State = iota
 	Candidate
 	Leader
+	Dead
 )
 
 type RequestVoteArgs struct {

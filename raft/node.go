@@ -9,7 +9,7 @@ import (
 )
 
 type Node struct {
-	mu sync.RWMutex
+	mu sync.Mutex
 
 	ID    int
 	Addr  string
@@ -43,22 +43,16 @@ func (n *Node) run() {
 
 		case <-n.electionTimer.C:
 			n.mu.Lock()
-			if n.State != Leader {
-				n.State = Candidate
-				n.mu.Unlock()
+			shouldStartElection := n.State != Leader
+			n.mu.Unlock()
+
+			if shouldStartElection {
 				go n.startElection()
-			} else {
-				n.mu.Unlock()
 			}
 
 			n.electionTimer.Reset(electionTimeout())
 
 		case <-n.heartbeatCh:
-			log.Printf("Node %d received heartbeat", n.ID)
-			// Reset the election timer.
-			// If the timer already expired before this heartbeat arrived,
-			// a stale event may still be pending in the timer channel.
-			// We drain it to prevent a false election.
 			if !n.electionTimer.Stop() {
 				select {
 				case <-n.electionTimer.C:
@@ -71,17 +65,22 @@ func (n *Node) run() {
 }
 
 func electionTimeout() time.Duration {
-	return time.Duration(150+rand.Intn(1500)) * time.Millisecond
+	return time.Duration(150+rand.Intn(150)) * time.Millisecond
 }
 
 func (n *Node) startElection() {
-	log.Printf("Node %d started election", n.ID)
 	n.mu.Lock()
+	if n.State == Leader {
+		n.mu.Unlock()
+		return
+	}
 	n.CurrentTerm++
 	n.State = Candidate
 	n.VotedFor = n.ID
 	localCurrentTerm := n.CurrentTerm
 	n.mu.Unlock()
+
+	log.Printf("[Node %d] election started (term=%d)", n.ID, localCurrentTerm)
 
 	numberOfVotes := 1
 	var voteMu sync.Mutex
@@ -89,8 +88,8 @@ func (n *Node) startElection() {
 	wg := sync.WaitGroup{}
 	wg.Add(len(n.Peers))
 
-	for _, peer := range n.Peers {
-		go func(peer *rpc.Client) {
+	for peerID, peer := range n.Peers {
+		go func(peerID int, peer *rpc.Client) {
 			defer wg.Done()
 
 			reply := RequestVoteReply{}
@@ -101,19 +100,27 @@ func (n *Node) startElection() {
 			}, &reply)
 
 			if err != nil {
+				log.Printf("[Node %d] RequestVote to Node %d failed: %v", n.ID, peerID, err)
 				return
 			}
 
 			if reply.Term > localCurrentTerm {
+				log.Printf("[Node %d] saw higher term %d from Node %d → reverting to follower", n.ID, reply.Term, peerID)
+				n.mu.Lock()
+				n.becomeFollower(reply.Term)
+				n.mu.Unlock()
 				return
 			}
 
 			if reply.VoteGranted {
+				log.Printf("[Node %d] got vote from Node %d (term=%d)", n.ID, peerID, localCurrentTerm)
 				voteMu.Lock()
 				numberOfVotes++
 				voteMu.Unlock()
+			} else {
+				log.Printf("[Node %d] vote denied by Node %d (term=%d)", n.ID, peerID, localCurrentTerm)
 			}
-		}(peer)
+		}(peerID, peer)
 	}
 
 	wg.Wait()
@@ -121,12 +128,20 @@ func (n *Node) startElection() {
 	clusterSize := len(n.Peers) + 1
 	majority := clusterSize/2 + 1
 
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.State != Candidate || n.CurrentTerm != localCurrentTerm {
+		log.Printf("[Node %d] election result discarded — state changed during election (state=%v term=%d)", n.ID, n.State, n.CurrentTerm)
+		return
+	}
+
 	if numberOfVotes >= majority {
-		log.Printf("Node %d won the election", n.ID)
-		n.mu.Lock()
+		log.Printf("[Node %d] won election (term=%d, votes=%d/%d)", n.ID, localCurrentTerm, numberOfVotes, clusterSize)
 		n.State = Leader
 		go n.leaderSendHeartbeat()
-		n.mu.Unlock()
+	} else {
+		log.Printf("[Node %d] lost election (term=%d, votes=%d/%d)", n.ID, localCurrentTerm, numberOfVotes, clusterSize)
 	}
 }
 
@@ -135,9 +150,9 @@ func (n *Node) leaderSendHeartbeat() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-
 		n.mu.Lock()
 		if n.State != Leader {
+			log.Printf("[Node %d] no longer leader, stopping heartbeats", n.ID)
 			n.mu.Unlock()
 			return
 		}
@@ -147,9 +162,7 @@ func (n *Node) leaderSendHeartbeat() {
 		n.mu.Unlock()
 
 		for peerID, peer := range n.Peers {
-
 			go func(peerID int, peer *rpc.Client, term int, leaderID int) {
-
 				args := AppendEntriesArgs{
 					Term:     term,
 					LeaderID: leaderID,
@@ -158,6 +171,7 @@ func (n *Node) leaderSendHeartbeat() {
 				var reply AppendEntriesReply
 
 				if err := peer.Call("RpcHandler.AppendEntries", args, &reply); err != nil {
+					log.Printf("[Node %d] heartbeat to Node %d failed: %v", leaderID, peerID, err)
 					return
 				}
 
@@ -169,15 +183,19 @@ func (n *Node) leaderSendHeartbeat() {
 				}
 
 				if reply.Term > n.CurrentTerm {
-					n.CurrentTerm = reply.Term
-					n.State = Follower
-					n.VotedFor = -1
-					return
+					log.Printf("[Node %d] saw higher term %d from Node %d → stepping down", leaderID, reply.Term, peerID)
+					n.becomeFollower(reply.Term)
 				}
-
 			}(peerID, peer, term, leaderID)
 		}
 	}
+}
+
+func (n *Node) becomeFollower(term int) {
+	log.Printf("[Node %d] became follower (term=%d)", n.ID, term)
+	n.State = Follower
+	n.VotedFor = -1
+	n.CurrentTerm = term
 }
 
 func (n *Node) StartRaft() {
